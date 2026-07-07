@@ -1,73 +1,3 @@
-[mvclass=show] *:not([mvclass=show]):not([mvclass=core]) {
-  display:none !important;
-  opacity:0 !important;
-  visibility: hidden !important;
-}
-
-[mvclass=show-t] >*:not([mvclass=show-t]):not([mvclass=core]) {
-  display:none !important;
-  opacity:0 !important;
-  visibility: hidden !important;
-}
-
-[mvclass=show],
-[mvclass=show-t] {
-  contain:unset !important;
-  min-width:0px !important;
-  min-height:0px !important;
-  width:0px !important;
-  height:0px !important;
-  transform: none !important;
-  -webkit-transform:none !important;
-  transform-style:flat !important;
-  -webkit-transform-style:flat !important;
-  border-width:0px !important;
-  will-change:auto !important;
-  mask-image: unset !important;
-  -webkit-mask-image: unset !important;
-  container-type: normal !important;
-  background: none !important;
-}
-
-video[mvclass=core] {
-  background-color:black;
-}
-
-.controls[mvclass=core],
-.hover-display[mvclass=core],
-.pl-controls-bottom[mvclass=core],
-.player-streamstatus[mvclass=core],
-.player-controls-bottom[mvclass=core] {
-  position: fixed !important;
-  z-index: 2147483640;
-}
-
-.pl-controls-bottom[mvclass=core]:hover,
-.player-controls-bottom[mvclass=core]:hover {
-  opacity: 1 !important;
-}
-
-.hover-display[mvclass=core] {
-  width: 100% !important;
-}
-
-.hover-display[mvclass=core]:hover {
-  opacity: 1 !important;
-}
-
-.hover-display[mvclass=core] .pl-pinned-panel {
-  display: none !important;
-}
-
-html[mvclass=core],
-body[mvclass=show],
-body[mvclass=show-t] {
-  contain:unset !important;
-  background-color: #000 !important;
-  position: relative !important;
-  overflow: hidden !important;
-}
-
 .mvCover {
   display: block;
   position: fixed;
@@ -100,6 +30,62 @@ body[mvclass=show-t] {
   opacity: 0.5;
 }
 
-[mvclass="show-t"] [data-a-target="player-settings-submenu-advanced-toggle-mini"] {
-  display:none !important;
+.mvVideoOverlayButton {
+  appearance: none !important;
+  -moz-appearance: none !important;
+  background: rgba(0, 0, 0, 0.22) !important;
+  border: 0 !important;
+  border-radius: 4px !important;
+  box-sizing: border-box !important;
+  color: rgba(255, 255, 255, 0.58) !important;
+  cursor: pointer !important;
+  display: none;
+  height: 26px !important;
+  margin: 0 !important;
+  min-height: 26px !important;
+  min-width: 26px !important;
+  opacity: 0.5 !important;
+  outline: none !important;
+  padding: 0 !important;
+  pointer-events: auto !important;
+  position: fixed !important;
+  transform: none !important;
+  transition: opacity 120ms ease, background-color 120ms ease !important;
+  width: 26px !important;
+  z-index: 2147483644 !important;
+}
+
+.mvVideoOverlayButton::before,
+.mvVideoOverlayButton::after {
+  border-color: currentColor !important;
+  border-style: solid !important;
+  content: "" !important;
+  height: 7px !important;
+  position: absolute !important;
+  width: 7px !important;
+}
+
+.mvVideoOverlayButton::before {
+  border-width: 2px 2px 0 0 !important;
+  right: 7px !important;
+  top: 7px !important;
+}
+
+.mvVideoOverlayButton::after {
+  border-width: 0 0 2px 2px !important;
+  bottom: 7px !important;
+  left: 7px !important;
+}
+
+.mvVideoOverlayButton:hover,
+.mvVideoOverlayButton:focus {
+  background: rgba(0, 0, 0, 0.5) !important;
+  color: rgba(255, 255, 255, 0.82) !important;
+  opacity: 0.86 !important;
+}
+
+.mvVideoOverlayButtonActive {
+  background: rgba(0, 0, 0, 0.34) !important;
+  color: rgba(255, 255, 255, 0.68) !important;
+  opacity: 0.66 !important;
 }

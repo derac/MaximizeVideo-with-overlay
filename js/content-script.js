@@ -1,6 +1,21 @@
 let currentPrefs = {};
 let init = false;
 
+const DEFAULT_MIN_WIDTH = 100;
+const DEFAULT_MIN_HEIGHT = 100;
+const VIDEO_OVERLAY_SYNC_INTERVAL = 1000;
+const VIDEO_OVERLAY_BUTTON_SIZE = 26;
+const VIDEO_OVERLAY_BUTTON_OFFSET = 6;
+const DEFAULT_CONTENT_PREFS = {
+  minWidth: DEFAULT_MIN_WIDTH,
+  minHeight: DEFAULT_MIN_HEIGHT,
+  showVideoOverlay: true,
+  enableFirstVideoHotkey: true,
+  firstVideoHotkey: 'T',
+  enableOverlayHotkey: true,
+  overlayHotkey: 'O'
+};
+
 const shortcutFuncs = {
   toggleCaptions: function(v){
     const validTracks = [];
@@ -238,18 +253,6 @@ MVUniversal.prototype={
   registerEvents: function(node) {
     if(!node.hasAttribute('mvEventReg')) {
       node.setAttribute('mvEventReg', 'true');
-      node.addEventListener('click', event => {
-        if(this.status === 'maximaVideo')
-          event.stopImmediatePropagation();
-      }, true);
-      node.addEventListener('mousedown', event => {
-        if(this.status === 'maximaVideo')
-          event.stopImmediatePropagation();
-      }, true);
-      node.addEventListener('mouseup', event => {
-        if(this.status === 'maximaVideo')
-          event.stopImmediatePropagation();
-      }, true);
       node.addEventListener('play', event => {
         if (!node.src) {
           let proxy = srcProxy[window.location.host]
@@ -373,6 +376,11 @@ else {
 mvImpl.status = 'normal';
 mvImpl.original = {};
 mvImpl.updateTimer = null;
+mvImpl.videoOverlayButtons = new Map();
+mvImpl.videoOverlayStarted = false;
+mvImpl.videoOverlayFrame = null;
+mvImpl.videoOverlayTimer = null;
+mvImpl.videoOverlayObserver = null;
 
 function getHashCode(length) {
   let hashCode = '';
@@ -461,13 +469,9 @@ function addToMvCover (elemInfo) {
   if(mvImpl.toolbarAction === 1 && diffTime > 600) {
     let selected = null;
     for(let v of videoBlocks) {
-      if(!selected) {
+      if(!selected && v.style.display !== 'none') {
         selected = v;
-      }
-      else {
-        if(parseInt(v.style.width) * parseInt(v.style.height) > parseInt(selected.style.width) * parseInt(selected.style.height)) {
-          selected = v;
-        }
+        break;
       }
     }
     if(selected) {
@@ -546,9 +550,6 @@ function maximizeMainNode() {
 
 function restoreVideo() {
   if (!mvImpl.selectedNode) return;
-  if (!mvImpl.youtubeControllers || (!isYoutubeEmbed() && !isYoutubeWatch())) {
-    mvImpl.setControllers(false);
-  }
   lockMainNodeStyle(false);
   mvImpl.mainNode.setAttribute('style', mvImpl.originalStyle);
 
@@ -556,6 +557,8 @@ function restoreVideo() {
   for(let cn of mvClassList) {
     let nodes = document.querySelectorAll('[mvclass='+cn+']');
     for(let node of nodes) {
+      if(node.classList && node.classList.contains('mvVideoOverlayButton'))
+        continue;
       node.removeAttribute('mvclass');
     }
   }
@@ -565,47 +568,25 @@ function restoreVideo() {
   }
 };
 
-function maximizeVideo(selectedNode, chain = []) {
-  const _chain = [...chain]
+function cancelMaximaMode() {
+  if(mvImpl.status !== 'maximaVideo')
+    return;
+  mvImpl.status = 'normal';
+  restoreVideo();
+  scheduleVideoOverlayUpdate();
+}
 
+function maximizeVideo(selectedNode, chain = []) {
   mvImpl.scrollPosition = { x: window.scrollX, y: window.scrollY };
 
-  const hideAllSibling = (node) => {
-    if(node === mvImpl.mainNode) {
-      node.setAttribute('mvclass', 'core');
-    }
-    else{ // if(node !== mvImpl.mainNode) {
-      node.setAttribute('mvclass', mvImpl.mvClass);
-    }
-
-    let parent = node.parentNode;
-    if(parent) {
-      if (parent.nodeType === Node.ELEMENT_NODE ) {
-        if(!mvImpl.topTags.includes(parent.tagName.toLocaleLowerCase())) {
-          hideAllSibling(parent);
-        }
-      } else if (parent.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-        if (_chain.length) {
-          parent = _chain.pop()
-          hideAllSibling(parent);
-        }
-      }
-    }
-  };
-
   mvImpl.selectedNode = selectedNode;
-  if (!mvImpl.youtubeControllers || (!isYoutubeEmbed() && !isYoutubeWatch())) {
-    mvImpl.setControllers(true);
-  }
   mvImpl.mainNode = mvImpl.getMainNode(selectedNode);
   if(window !== window.top) { //this video is in iframe
     window.parent.postMessage({action: 'getId', senderId: selfId, nextAction: 'setVideoNode'},'*');
   }
   mvImpl.registerEvents(mvImpl.mainNode);
-  if (!mvImpl.youtubeControllers || (!isYoutubeEmbed() && !isYoutubeWatch())) {
-    hideAllSibling(mvImpl.mainNode);
-  }
   maximizeMainNode();
+  scheduleVideoOverlayUpdate();
 }
 
 function getChildIFrameById(id) {
@@ -654,6 +635,7 @@ window.addEventListener('message', e => {
       iframe.setAttribute('mvHashCode', hashCode);
     }
     mvImpl.currentHashCode = hashCode;
+    mvImpl.status = 'maximaVideo';
     maximizeVideo(iframe);
     // if(window !== window.top) {
     //   window.parent.postMessage({action: 'getId', senderId: selfId, nextAction: 'setVideoNode'},'*');
@@ -677,12 +659,76 @@ window.addEventListener('message', e => {
       }
     }
   }
+  else if(e.data.action === 'cancelMaximaMode') {
+    cancelMaximaMode();
+    if(window !== window.top) {
+      window.parent.postMessage({action: 'cancelMaximaMode'}, '*');
+    }
+  }
 });
+
+function isEditableHotkeyTarget(target) {
+  if(!target)
+    return false;
+  if(target.isContentEditable)
+    return true;
+
+  let tagName = target.tagName ? target.tagName.toLocaleLowerCase() : '';
+  return ['input', 'textarea', 'select', 'button'].includes(tagName);
+}
+
+function stopHotkeyEvent(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  return false;
+}
+
+function toggleVideoOverlayPreference() {
+  let showVideoOverlay = !shouldShowVideoOverlay();
+  currentPrefs.showVideoOverlay = showVideoOverlay;
+  chrome.storage.local.set({showVideoOverlay: showVideoOverlay});
+  scheduleVideoOverlayUpdate();
+}
+
+function handleConfiguredHotkey(event) {
+  if(event.altKey || event.metaKey || event.ctrlKey || isEditableHotkeyTarget(event.target)) {
+    return true;
+  }
+
+  let key = normalizeHotkeyValue(event.key);
+  let overlayHotkey = normalizeHotkeyValue(getPref('overlayHotkey'));
+  if(getPref('enableOverlayHotkey') !== false && overlayHotkey && key === overlayHotkey) {
+    toggleVideoOverlayPreference();
+    return stopHotkeyEvent(event);
+  }
+
+  let firstVideoHotkey = normalizeHotkeyValue(getPref('firstVideoHotkey'));
+  if(
+    getPref('enableFirstVideoHotkey') !== false &&
+    firstVideoHotkey &&
+    key === firstVideoHotkey
+  ) {
+    if(mvImpl.status === 'maximaVideo') {
+      requestCancelMaximaMode();
+    }
+    else if(mvImpl.status === 'normal') {
+      chrome.runtime.sendMessage({action: 'maximizeFirstVideo'});
+    }
+    return stopHotkeyEvent(event);
+  }
+
+  return true;
+}
 
 window.addEventListener('keydown', event => {
   if(event.key === 'Escape' && mvImpl.status === 'selectVideo') {
     chrome.runtime.sendMessage({action: 'cancelSelectMode'});
-  } else if (mvImpl.status === 'maximaVideo') {
+  }
+  else if(handleConfiguredHotkey(event) === false) {
+    return false;
+  }
+  else if (mvImpl.status === 'maximaVideo') {
     if (event.altKey || event.metaKey || event.ctrlKey) {
       return true;
     }
@@ -723,15 +769,6 @@ const handleKeyEvent = (event) => {
 }
 window.addEventListener('keypress', handleKeyEvent, true);
 window.addEventListener('keyup', handleKeyEvent, true);
-window.addEventListener('DOMContentLoaded', event => {
-  document.addEventListener('fullscreenchange', event => {
-    if (mvImpl.status === 'maximaVideo' && !mvImpl.youtubeControllers && !mvImpl instanceof MVTwitch && !mvImpl instanceof MVETwitch) {
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-    }
-  }, true);
-});
-
 function inRect(point, rect) {
   return (point.x > rect.left && point.x < rect.right &&
   point.y > rect.top && point.y < rect.bottom);
@@ -881,10 +918,9 @@ function findVideoElements(selector) {
   _findShadowRoots(document)
   if (shadowRoots.length) {
     for(const e of shadowRoots) {
-      const v = e.shadowRoot.querySelector(selector)
-      if (v) {
-        elements.push(v)
-      }
+      e.shadowRoot.querySelectorAll(selector).forEach(element => {
+        elements.push(element)
+      })
     }
   }
   return elements
@@ -903,18 +939,6 @@ function findVideoElement(selector) {
       if (!element.shadowRoot) {
         return
       }
-      if (!element.querySelector('#shadowStyle')) {
-        const shadowStyle = document.createElement('style');
-        shadowStyle.setAttribute('id', 'shadowStyle')
-        shadowStyle.textContent = `
-          :host([mvclass=show]) *:not([mvclass=show]):not([mvclass=core]) {
-            display:none !important;
-            opacity:0 !important;
-            visibility: hidden !important;
-          }
-        `;
-        element.appendChild(shadowStyle);
-      }
       const e = element.shadowRoot.querySelector(selector)
       if (e) {
         res = {elem: e, chain: [ ...chain, element ]}
@@ -931,6 +955,246 @@ function findVideoElement(selector) {
   return res
 }
 
+function getPref(name) {
+  return currentPrefs[name] !== undefined ? currentPrefs[name] : DEFAULT_CONTENT_PREFS[name];
+}
+
+function normalizeHotkeyValue(value) {
+  return (value || '').trim().charAt(0).toUpperCase();
+}
+
+function getMinVideoWidth() {
+  let minWidth = parseInt(getPref('minWidth'));
+  return Number.isFinite(minWidth) ? minWidth : DEFAULT_MIN_WIDTH;
+}
+
+function getMinVideoHeight() {
+  let minHeight = parseInt(getPref('minHeight'));
+  return Number.isFinite(minHeight) ? minHeight : DEFAULT_MIN_HEIGHT;
+}
+
+function shouldShowVideoOverlay() {
+  return getPref('showVideoOverlay') !== false;
+}
+
+function getVisibleButtonPosition(rect, buttonSize, buttonOffset) {
+  let maxLeft = Math.max(buttonOffset, window.innerWidth - buttonSize - buttonOffset);
+  let maxTop = Math.max(buttonOffset, window.innerHeight - buttonSize - buttonOffset);
+  return {
+    left: Math.max(
+      buttonOffset,
+      Math.min(maxLeft, rect.right - buttonSize - buttonOffset)
+    ),
+    top: Math.max(
+      buttonOffset,
+      Math.min(maxTop, rect.top + buttonOffset)
+    )
+  };
+}
+
+function positionVideoOverlayButton(entry) {
+  if(!entry || !entry.elem || !entry.elem.isConnected) {
+    return false;
+  }
+
+  entry.button.setAttribute('mvclass', 'core');
+  if(mvImpl.status === 'maximaVideo' && mvImpl.currentHashCode !== entry.hashCode) {
+    entry.button.style.display = 'none';
+    entry.button.classList.remove('mvVideoOverlayButtonActive');
+    return true;
+  }
+
+  let rect = entry.elem.getBoundingClientRect();
+  let visible = isVisible(entry.elem, rect);
+  if(rect.width < getMinVideoWidth() || rect.height < getMinVideoHeight()) {
+    visible = false;
+  }
+
+  if(!visible) {
+    entry.button.style.display = 'none';
+    return true;
+  }
+
+  const buttonSize = VIDEO_OVERLAY_BUTTON_SIZE;
+  const buttonOffset = VIDEO_OVERLAY_BUTTON_OFFSET;
+  const position = getVisibleButtonPosition(rect, buttonSize, buttonOffset);
+  entry.button.style.left = position.left + 'px';
+  entry.button.style.top = position.top + 'px';
+  entry.button.style.display = 'block';
+  entry.button.classList.toggle(
+    'mvVideoOverlayButtonActive',
+    mvImpl.status === 'maximaVideo' && mvImpl.currentHashCode === entry.hashCode
+  );
+  return true;
+}
+
+function removeVideoOverlayButton(hashCode) {
+  let entry = mvImpl.videoOverlayButtons.get(hashCode);
+  if(entry && entry.button && entry.button.parentNode) {
+    entry.button.parentNode.removeChild(entry.button);
+  }
+  mvImpl.videoOverlayButtons.delete(hashCode);
+}
+
+function handleVideoOverlayClick(event, hashCode) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  event.currentTarget.setAttribute('mvclass', 'core');
+
+  if(mvImpl.status === 'maximaVideo' && mvImpl.currentHashCode === hashCode) {
+    requestCancelMaximaMode();
+    return false;
+  }
+
+  chrome.runtime.sendMessage({
+    action: 'maximizeVideo',
+    url: window.location.href,
+    hashCode: hashCode,
+    directFrame: true
+  });
+  return false;
+}
+
+function requestCancelMaximaMode() {
+  clearHideCursorTimer();
+  cancelMaximaMode();
+  if(window !== window.top) {
+    window.parent.postMessage({action: 'cancelMaximaMode'}, '*');
+  }
+  chrome.runtime.sendMessage({
+    action: 'cancelMaximaMode',
+    url: window.location.href,
+    directFrame: true
+  });
+}
+
+function createVideoOverlayButton(hashCode) {
+  let button = document.createElement('BUTTON');
+  button.classList.add('mvVideoOverlayButton');
+  button.setAttribute('type', 'button');
+  button.setAttribute('mvclass', 'core');
+  button.setAttribute('mvOverlayHash', hashCode);
+  button.setAttribute('aria-label', chrome.i18n.getMessage('maximizeThisVideo') || 'Maximize this video');
+  button.setAttribute('title', chrome.i18n.getMessage('maximizeThisVideo') || 'Maximize this video');
+
+  const blockEvent = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  };
+  button.addEventListener('mousedown', event => {
+    if(event.button === 0) {
+      handleVideoOverlayClick(event, hashCode);
+    }
+    else {
+      blockEvent(event);
+    }
+  }, true);
+  button.addEventListener('mouseup', blockEvent, true);
+  button.addEventListener('click', blockEvent, true);
+
+  document.body.appendChild(button);
+  return button;
+}
+
+function syncVideoOverlayButtons() {
+  if(!document.body) {
+    scheduleVideoOverlayUpdate();
+    return;
+  }
+
+  if(!shouldShowVideoOverlay()) {
+    for(let entry of mvImpl.videoOverlayButtons.values()) {
+      entry.button.style.display = 'none';
+      entry.button.classList.remove('mvVideoOverlayButtonActive');
+    }
+    return;
+  }
+
+  let activeHashCodes = new Set();
+  let elements = findVideoElements('video');
+  for(let elem of elements) {
+    let elemInfo = getElemInfo(elem);
+    let hashCode = elemInfo.hashCode;
+    if(elemInfo.width < getMinVideoWidth() || elemInfo.height < getMinVideoHeight()) {
+      continue;
+    }
+
+    activeHashCodes.add(hashCode);
+    let entry = mvImpl.videoOverlayButtons.get(hashCode);
+    if(!entry) {
+      entry = {
+        elem: elem,
+        hashCode: hashCode,
+        button: createVideoOverlayButton(hashCode)
+      };
+      mvImpl.videoOverlayButtons.set(hashCode, entry);
+    }
+    else {
+      entry.elem = elem;
+    }
+    positionVideoOverlayButton(entry);
+  }
+
+  for(let hashCode of mvImpl.videoOverlayButtons.keys()) {
+    if(!activeHashCodes.has(hashCode)) {
+      removeVideoOverlayButton(hashCode);
+    }
+  }
+}
+
+function scheduleVideoOverlayUpdate() {
+  if(mvImpl.videoOverlayFrame !== null) {
+    return;
+  }
+
+  mvImpl.videoOverlayFrame = window.requestAnimationFrame(() => {
+    mvImpl.videoOverlayFrame = null;
+    syncVideoOverlayButtons();
+  });
+}
+
+function startVideoOverlayButtons() {
+  if(mvImpl.videoOverlayStarted) {
+    return;
+  }
+  mvImpl.videoOverlayStarted = true;
+
+  initPrefs(scheduleVideoOverlayUpdate);
+  window.addEventListener('resize', scheduleVideoOverlayUpdate, true);
+  window.addEventListener('scroll', scheduleVideoOverlayUpdate, true);
+
+  if(document.documentElement) {
+    mvImpl.videoOverlayObserver = new MutationObserver(mutations => {
+      for(let mutation of mutations) {
+        if(!mutation.target.classList || !mutation.target.classList.contains('mvVideoOverlayButton')) {
+          scheduleVideoOverlayUpdate();
+          return;
+        }
+      }
+    });
+    mvImpl.videoOverlayObserver.observe(document.documentElement, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: ['class', 'hidden', 'src', 'style']
+    });
+  }
+
+  mvImpl.videoOverlayTimer = window.setInterval(scheduleVideoOverlayUpdate, VIDEO_OVERLAY_SYNC_INTERVAL);
+  scheduleVideoOverlayUpdate();
+}
+
+window.addEventListener('mvToolbarToggleMaximaMode', event => {
+  if(mvImpl.status !== 'maximaVideo') {
+    return;
+  }
+
+  event.preventDefault();
+  requestCancelMaximaMode();
+}, true);
+
 chrome.runtime.onMessage.addListener( (message, sender, sendResponse) => {
   if(message.action === 'videoHotkey') {
     if(mvImpl.mainNode.tagName === 'VIDEO') {
@@ -941,7 +1205,6 @@ chrome.runtime.onMessage.addListener( (message, sender, sendResponse) => {
   else if(message.action === 'maximizeVideo') {
     if(mvImpl.status === 'maximaVideo')
       return;
-    mvImpl.status = 'maximaVideo';
     removeVideoMask();
     let elements = document.querySelectorAll('video');
     for(let v of elements) {
@@ -951,12 +1214,11 @@ chrome.runtime.onMessage.addListener( (message, sender, sendResponse) => {
 
     let { elem, chain } = findVideoElement('video[mvHashCode="'+message.hashCode+'"]')
     if(elem) {
+      mvImpl.status = 'maximaVideo';
       initPrefs( ()=>{
         setHideCursorTimer();
       });
-      mvImpl.setCoreNode();
       mvImpl.currentHashCode = message.hashCode;
-      mvImpl.youtubeControllers = message.youtubeControllers;
       if(isYoutubeEmbed() && !elem.src) {
         elem.click();
         elem.addEventListener('progress', ()=>{
@@ -1038,9 +1300,7 @@ chrome.runtime.onMessage.addListener( (message, sender, sendResponse) => {
     removeVideoMask();
   }
   else if(message.action === 'cancelMaximaMode') {
-    mvImpl.status = 'normal';
-    mvImpl.restoreCoreNode();
-    restoreVideo();
+    cancelMaximaMode();
   }
   return false;
 });
@@ -1063,7 +1323,7 @@ function initPrefs(cb){
       if ((typeof results.length === 'number') && (results.length > 0)) {
         results = results[0];
       }
-      currentPrefs = results;
+      currentPrefs = Object.assign({}, DEFAULT_CONTENT_PREFS, results);
       cb();
     });
 
@@ -1073,6 +1333,11 @@ function initPrefs(cb){
         for (let item of changedItems) {
           currentPrefs[item] = changes[item].newValue;
           switch (item) {
+            case 'minWidth':
+            case 'minHeight':
+            case 'showVideoOverlay':
+              scheduleVideoOverlayUpdate();
+              break;
             case 'autoHideCursor':
             case 'delayForHideCursor':
               if(mvImpl.status === 'maximaVideo') {
@@ -1087,4 +1352,13 @@ function initPrefs(cb){
   else {
     cb();
   }
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  startVideoOverlayButtons();
+}
+else {
+  window.addEventListener('DOMContentLoaded', event => {
+    startVideoOverlayButtons();
+  }, true);
 }

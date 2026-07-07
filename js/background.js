@@ -2,6 +2,13 @@ let mvTabs = [];
 let resetTabs = [];
 let selectedVideo = null;
 
+const getDefaultIconColor = () => {
+  if(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 1;
+  }
+  return 0;
+};
+
 let defaultPreference = {
   popupWindow: false,
   toolbarAction: 0,
@@ -10,9 +17,13 @@ let defaultPreference = {
   minHeight: 100,
   autoHideCursor: false,
   delayForHideCursor: 5,
-  iconColor: 0,
-  youtubeControllers: false,
-  version: 8
+  iconColor: getDefaultIconColor(),
+  showVideoOverlay: true,
+  enableFirstVideoHotkey: true,
+  firstVideoHotkey: 'T',
+  enableOverlayHotkey: true,
+  overlayHotkey: 'O',
+  version: 9
 };
 let preferences = {};
 
@@ -66,6 +77,10 @@ const loadPreference = () => {
           needUpdate = true;
         }
       }
+      if(preferences.version !== defaultPreference.version) {
+        update.version = defaultPreference.version;
+        needUpdate = true;
+      }
       if(needUpdate) {
         chrome.storage.local.set(update);
       }
@@ -82,6 +97,40 @@ const setBrowserActionIcon = () => {
   }
 };
 
+const sendTabMessage = (tabId, message, frameId) => {
+  if(frameId !== undefined) {
+    chrome.tabs.sendMessage(tabId, message, {frameId});
+  }
+  else {
+    chrome.tabs.sendMessage(tabId, message);
+  }
+};
+
+const startSelectVideo = (tab, toolbarAction) => {
+  let hashCode = getHashCode();
+  chrome.tabs.sendMessage(tab.id, {
+    action: 'setVideoMask',
+    toolbarAction: toolbarAction !== undefined ? toolbarAction : preferences.toolbarAction,
+    hashCode: hashCode
+  });
+};
+
+const toggleMaximaModeInTab = (tab, fallback) => {
+  chrome.tabs.executeScript(tab.id, {
+    allFrames: true,
+    code: '(function(){var event = new CustomEvent("mvToolbarToggleMaximaMode",{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented;})()'
+  }, results => {
+    if(chrome.runtime.lastError) {
+      fallback();
+      return;
+    }
+    if(results && results.some(result => result === true)) {
+      return;
+    }
+    fallback();
+  });
+};
+
 window.addEventListener('DOMContentLoaded', event => {
   loadPreference();
 });
@@ -93,12 +142,7 @@ chrome.browserAction.onClicked.addListener(tab => {
 
 const execBrowserAction = (tab) => {
   if(!['about:addons', 'about:blank'].includes(tab.url)) {
-    let hashCode = getHashCode();
-    chrome.tabs.sendMessage(tab.id, {
-      action: 'setVideoMask',
-      toolbarAction: preferences.toolbarAction,
-    hashCode: hashCode
-    });
+    toggleMaximaModeInTab(tab, () => startSelectVideo(tab));
   }
 };
 
@@ -204,39 +248,28 @@ const messageHandler = (message, sender, sendResponse) => {
     });
   }
   else if(message.action === 'maximizeVideo'){
-    const exec = ({youtubeControllers}) => {
-      chrome.tabs.sendMessage(sender.tab.id, {
-        action: 'maximizeVideo',
-        hashCode: message.hashCode,
-        strict: message.strict,
-        youtubeControllers
-      });
-    }
-
-    if (preferences.youtubeControllers && message.url.startsWith('https://www.youtube.com/watch')) {
-      exec({youtubeControllers: true})
-      chrome.tabs.sendMessage(sender.tab.id, {
-        action: 'maximizeVideo-ytb',
-      });
-    } else {
-      exec({youtubeControllers: false})
-    }
+    sendTabMessage(sender.tab.id, {
+      action: 'maximizeVideo',
+      hashCode: message.hashCode,
+      strict: message.strict
+    }, message.directFrame ? sender.frameId : undefined);
+  }
+  else if(message.action === 'maximizeFirstVideo'){
+    startSelectVideo(sender.tab, 1);
   }
   else if(message.action === 'cancelMaximaMode'){
-    const exec = ({youtubeControllers}) => {
-      chrome.tabs.sendMessage(sender.tab.id, {
-        action: 'cancelMaximaMode',
-        youtubeControllers
-      });
-    }
+    const cancelMessage = {
+      action: 'cancelMaximaMode'
+    };
 
-    if (preferences.youtubeControllers && message.url.startsWith('https://www.youtube.com/watch')) {
-      exec({youtubeControllers: true})
-      chrome.tabs.sendMessage(sender.tab.id, {
-        action: 'cancelMaximaMode-ytb',
-      });
-    } else {
-      exec({youtubeControllers: false})
+    if(message.directFrame) {
+      sendTabMessage(sender.tab.id, cancelMessage, sender.frameId);
+      if(sender.frameId !== 0) {
+        sendTabMessage(sender.tab.id, cancelMessage, 0);
+      }
+    }
+    else {
+      sendTabMessage(sender.tab.id, cancelMessage);
     }
   }
   else if(message.action === 'videoHotkey'){

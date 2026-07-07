@@ -51,6 +51,28 @@
         </div> -->
 
         <div class="itemDiv">
+          <div>
+            <input type="checkbox" id="showVideoOverlay">
+            <label for="showVideoOverlay" data-l10n-id="showVideoOverlay">Show video overlay buttons</label>
+          </div>
+        </div>
+
+        <div class="itemDiv">
+          <div>
+            <input type="checkbox" id="enableFirstVideoHotkey">
+            <label for="enableFirstVideoHotkey" data-l10n-id="enableFirstVideoHotkey">Enable hotkey to maximize the first video</label>
+            <label for="firstVideoHotkey" data-l10n-id="firstVideoHotkey">Key</label>
+            <input type="text" maxlength="1" id="firstVideoHotkey" class="hotkeyInput">
+          </div>
+          <div style="margin-top: 2px;">
+            <input type="checkbox" id="enableOverlayHotkey">
+            <label for="enableOverlayHotkey" data-l10n-id="enableOverlayHotkey">Enable hotkey to show or hide overlay buttons</label>
+            <label for="overlayHotkey" data-l10n-id="overlayHotkey">Key</label>
+            <input type="text" maxlength="1" id="overlayHotkey" class="hotkeyInput">
+          </div>
+        </div>
+
+        <div class="itemDiv">
           <div id="iconColor" type="radioGroup">
             <label data-l10n-id="iconColor">Toolbar button icon color</label>
             <input type="radio" id="iconColorBlack" name="iconColor" value="0">
@@ -79,13 +101,6 @@
           </div>
           <div>
             <a href='https://addons.mozilla.org/firefox/addon/popup-window/' data-l10n-id="installPopupWindow">https://addons.mozilla.org/firefox/addon/popup-window/</a>
-          </div>
-        </div>
-
-        <div class="itemDiv">
-          <div>
-            <input type="checkbox" id="youtubeControllers">
-            <label for="youtubeControllers" data-l10n-id="youtubeControllers">Keep original video controls on Youtube</label>
           </div>
         </div>
 

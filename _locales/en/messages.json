@@ -31,6 +31,26 @@
     "message": "Support Flash video",
     "description": ""
   },
+  "showVideoOverlay": {
+    "message": "Show video overlay buttons",
+    "description": ""
+  },
+  "enableFirstVideoHotkey": {
+    "message": "Enable hotkey to maximize the first video",
+    "description": ""
+  },
+  "firstVideoHotkey": {
+    "message": "Key",
+    "description": ""
+  },
+  "enableOverlayHotkey": {
+    "message": "Enable hotkey to show or hide overlay buttons",
+    "description": ""
+  },
+  "overlayHotkey": {
+    "message": "Key",
+    "description": ""
+  },
   "ignoreTinyElement": {
     "message": "Ignore tiny element:",
     "description": ""
@@ -77,10 +97,6 @@
   },
   "execute": {
     "message": "Maximize video",
-    "description": ""
-  },
-  "youtubeControllers": {
-    "message": "Keep original video controls on Youtube",
     "description": ""
   }
 }

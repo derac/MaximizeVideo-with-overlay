@@ -31,6 +31,26 @@
     "message": "支援 Flash 影片",
     "description": ""
   },
+  "showVideoOverlay": {
+    "message": "顯示影片覆蓋按鈕",
+    "description": ""
+  },
+  "enableFirstVideoHotkey": {
+    "message": "啟用最大化第一個影片的快捷鍵",
+    "description": ""
+  },
+  "firstVideoHotkey": {
+    "message": "按鍵",
+    "description": ""
+  },
+  "enableOverlayHotkey": {
+    "message": "啟用顯示或隱藏覆蓋按鈕的快捷鍵",
+    "description": ""
+  },
+  "overlayHotkey": {
+    "message": "按鍵",
+    "description": ""
+  },
   "ignoreTinyElement": {
     "message": "忽略小型元素：",
     "description": ""
@@ -77,10 +97,6 @@
   },
   "execute": {
     "message": "影片最大化",
-    "description": ""
-  },
-  "youtubeControllers": {
-    "message": "在 Youtube 網站使用原有的播放器控制列",
     "description": ""
   }
 }

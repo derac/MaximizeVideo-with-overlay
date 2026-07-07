@@ -1,9 +1,20 @@
 let currentPrefs = {};
+const defaultPrefs = {
+  showVideoOverlay: true,
+  enableFirstVideoHotkey: true,
+  firstVideoHotkey: 'T',
+  enableOverlayHotkey: true,
+  overlayHotkey: 'O'
+};
 
 const saveToPreference = (id, value) => {
   let update = {};
   update[id] = value;
   chrome.storage.local.set(update);
+};
+
+const normalizeHotkeyValue = value => {
+  return (value || '').trim().charAt(0).toUpperCase();
 };
 
 const handleVelueChange = id => {
@@ -18,6 +29,12 @@ const handleVelueChange = id => {
     else if(elemType === 'number') {
       elem.addEventListener('input', event => {
         saveToPreference(id, parseInt(elem.value));
+      });
+    }
+    else if(elemType === 'text') {
+      elem.addEventListener('input', event => {
+        elem.value = normalizeHotkeyValue(elem.value);
+        saveToPreference(id, elem.value);
       });
     }
     else if(elemType === 'option') {
@@ -46,6 +63,9 @@ const setValueToElem = (id, value) => {
     }
     if(elemType === 'number') {
       elem.value = value;
+    }
+    else if(elemType === 'text') {
+      elem.value = normalizeHotkeyValue(value);
     }
     else if(elemType === 'option') {
       let options = Array.from(elem.querySelectorAll('option'));
@@ -86,7 +106,7 @@ window.addEventListener('load', event => {
       results = results[0];
     }
     if (results.version) {
-      init(results);
+      init(Object.assign({}, defaultPrefs, results));
     }
   });
 }, true);

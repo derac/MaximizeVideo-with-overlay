@@ -16,3 +16,9 @@ div.col {
 .delayForHideCursor {
   width: 50px;
 }
+
+.hotkeyInput {
+  width: 30px;
+  text-align: center;
+  text-transform: uppercase;
+}
