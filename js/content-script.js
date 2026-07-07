@@ -227,7 +227,7 @@ MVUniversal.prototype={
   restoreCoreNode: function () {
   },
   getMainNode: function (node) {
-    return node;
+    return getVideoPlayerNode(node);
   },
   setControllers: function (show) {
     let node = this.selectedNode;
@@ -359,7 +359,20 @@ let vnStyleList = [
   'min-height', 'width', 'height',
   'max-width', 'max-height', 'margin',
   'padding', 'visibility', 'border-width',
-  'cursor'];
+  'cursor', 'object-fit', 'z-index'];
+let selectedVideoStyle = [
+  'width:100% !important;',
+  'height:100% !important;',
+  'max-width:100% !important;',
+  'max-height:100% !important;',
+  'object-fit:contain !important;',
+  'background-color:black !important;',
+  'z-index:auto !important;',
+].join('');
+let selectedVideoStyleList = [
+  'width', 'height', 'max-width',
+  'max-height', 'object-fit', 'background-color',
+  'z-index'];
 
 if(window.location.href.startsWith('https://www.twitch.tv/')) {
   mvImpl = new MVTwitch();
@@ -381,6 +394,7 @@ mvImpl.videoOverlayStarted = false;
 mvImpl.videoOverlayFrame = null;
 mvImpl.videoOverlayTimer = null;
 mvImpl.videoOverlayObserver = null;
+mvImpl.pendingSurfaceClick = null;
 
 function getHashCode(length) {
   let hashCode = '';
@@ -513,14 +527,7 @@ function lockMainNodeStyle(lock) {
   }
 }
 
-function maximizeMainNode() {
-  let originalStyle = mvImpl.originalStyle = (mvImpl.mainNode.getAttribute('style') || '');
-  let fixedStyle = vnStyle;
-  let fixedStyleList = [...vnStyleList]
-  if(shouldPassPointerEventsThroughMainNode()) {
-    fixedStyle += 'pointer-events:none !important;';
-    fixedStyleList.push('pointer-events');
-  }
+function getMergedFixedStyle(originalStyle, fixedStyle, fixedStyleList) {
   let vnNewStyle = '';
   originalStyle = originalStyle.trim().replace(/\r\n/g, '\r').replace(/\n/g, '\r').replace(/\r/g, '');
   if (originalStyle === '') {
@@ -547,21 +554,159 @@ function maximizeMainNode() {
       vnNewStyle = fixedStyle + slist.join(';')+';';
     }
   }
-  mvImpl.vnNewStyle = vnNewStyle;
-  mvImpl.mainNode.setAttribute('style', vnNewStyle);
-  lockMainNodeStyle(true);
-};
+  return vnNewStyle;
+}
 
-function shouldPassPointerEventsThroughMainNode() {
-  return mvImpl.mainNode &&
-    mvImpl.mainNode.tagName === 'VIDEO' &&
-    !mvImpl.mainNode.hasAttribute('controls');
+function maximizeMainNode() {
+  let originalStyle = mvImpl.originalStyle = (mvImpl.mainNode.getAttribute('style') || '');
+  mvImpl.vnNewStyle = getMergedFixedStyle(originalStyle, vnStyle, [...vnStyleList]);
+  mvImpl.mainNode.setAttribute('style', mvImpl.vnNewStyle);
+  lockMainNodeStyle(true);
+  maximizeSelectedVideoNode();
+}
+
+function isPlayerControlNode(node) {
+  let controlPattern = /(^|[\s_-])(control|controls|button|btn|seek|scrub|progress|slider|volume|mute|play|pause|time|bar|range|settings|menu|caption|fullscreen|speed|rate)([\s_-]|$)/i;
+
+  if(!node || !node.tagName) {
+    return false;
+  }
+  if(node.classList && node.classList.contains('mvVideoOverlayButton')) {
+    return false;
+  }
+
+  let tagName = node.tagName.toLocaleLowerCase();
+  let inputType = node.getAttribute ? (node.getAttribute('type') || '').toLocaleLowerCase() : '';
+  if(tagName === 'input' && ['range', 'button'].includes(inputType)) {
+    return true;
+  }
+
+  let role = node.getAttribute ? node.getAttribute('role') : '';
+  if(role && role.toLocaleLowerCase() === 'slider') {
+    return true;
+  }
+
+  let className = typeof node.className === 'string' ? node.className : '';
+  let text = [
+    node.id || '',
+    className,
+    node.getAttribute ? node.getAttribute('aria-label') || '' : '',
+    node.getAttribute ? node.getAttribute('title') || '' : ''
+  ].join(' ');
+  return controlPattern.test(text);
+}
+
+function hasPlayerControls(node, video) {
+  let elements = node.querySelectorAll('*');
+  for(let elem of elements) {
+    if(elem === video || video.contains(elem)) {
+      continue;
+    }
+    if(isPlayerControlNode(elem)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function getVideoPlayerNode(node) {
+  if(!node || node.tagName !== 'VIDEO') {
+    return node;
+  }
+
+  let parent = node.parentElement;
+  for(let depth = 0; parent && depth < 5; ++depth, parent = parent.parentElement) {
+    let tagName = parent.tagName ? parent.tagName.toLocaleLowerCase() : '';
+    if(tagName === 'body' || tagName === 'html') {
+      break;
+    }
+    if(hasPlayerControls(parent, node)) {
+      return parent;
+    }
+  }
+
+  return node;
+}
+
+function maximizeSelectedVideoNode() {
+  if(!mvImpl.selectedNode || mvImpl.selectedNode === mvImpl.mainNode || mvImpl.selectedNode.tagName !== 'VIDEO') {
+    mvImpl.selectedVideoOriginalStyle = null;
+    return;
+  }
+
+  mvImpl.selectedVideoOriginalStyle = mvImpl.selectedNode.getAttribute('style') || '';
+  mvImpl.selectedVideoNewStyle = getMergedFixedStyle(
+    mvImpl.selectedVideoOriginalStyle,
+    selectedVideoStyle,
+    [...selectedVideoStyleList]
+  );
+  mvImpl.selectedNode.setAttribute('style', mvImpl.selectedVideoNewStyle);
+}
+
+function shouldHandleVideoSurfaceClick(event) {
+  return mvImpl.status === 'maximaVideo' &&
+    mvImpl.selectedNode &&
+    mvImpl.selectedNode.tagName === 'VIDEO' &&
+    event.target === mvImpl.selectedNode &&
+    (event.button === undefined || event.button === 0);
+}
+
+function storeVideoSurfaceClick(event) {
+  if(!shouldHandleVideoSurfaceClick(event)) {
+    mvImpl.pendingSurfaceClick = null;
+    return;
+  }
+
+  mvImpl.pendingSurfaceClick = {
+    currentTime: mvImpl.selectedNode.currentTime,
+    muted: mvImpl.selectedNode.muted,
+    node: mvImpl.selectedNode,
+    paused: mvImpl.selectedNode.paused,
+    playbackRate: mvImpl.selectedNode.playbackRate,
+    volume: mvImpl.selectedNode.volume,
+    x: event.clientX,
+    y: event.clientY
+  };
+}
+
+function handleVideoSurfaceClick(event) {
+  let pendingClick = mvImpl.pendingSurfaceClick;
+  mvImpl.pendingSurfaceClick = null;
+  if(!pendingClick || !shouldHandleVideoSurfaceClick(event)) {
+    return true;
+  }
+  if(Math.abs(event.clientX - pendingClick.x) > 6 || Math.abs(event.clientY - pendingClick.y) > 6) {
+    return true;
+  }
+
+  setTimeout(() => {
+    if(
+      mvImpl.status !== 'maximaVideo' ||
+      mvImpl.selectedNode !== pendingClick.node ||
+      mvImpl.selectedNode.paused !== pendingClick.paused ||
+      Math.abs(mvImpl.selectedNode.currentTime - pendingClick.currentTime) > 0.25 ||
+      mvImpl.selectedNode.muted !== pendingClick.muted ||
+      mvImpl.selectedNode.playbackRate !== pendingClick.playbackRate ||
+      Math.abs(mvImpl.selectedNode.volume - pendingClick.volume) > 0.01
+    ) {
+      return;
+    }
+
+    shortcutFuncs.togglePlay(mvImpl.selectedNode);
+  }, 0);
+  return true;
 }
 
 function restoreVideo() {
   if (!mvImpl.selectedNode) return;
   lockMainNodeStyle(false);
   mvImpl.mainNode.setAttribute('style', mvImpl.originalStyle);
+  if(mvImpl.selectedVideoOriginalStyle !== null && mvImpl.selectedVideoOriginalStyle !== undefined) {
+    mvImpl.selectedNode.setAttribute('style', mvImpl.selectedVideoOriginalStyle);
+    mvImpl.selectedVideoOriginalStyle = null;
+    mvImpl.selectedVideoNewStyle = null;
+  }
 
   let mvClassList = [mvImpl.mvClass, 'core'];
   for(let cn of mvClassList) {
@@ -594,7 +739,7 @@ function maximizeVideo(selectedNode, chain = []) {
   if(window !== window.top) { //this video is in iframe
     window.parent.postMessage({action: 'getId', senderId: selfId, nextAction: 'setVideoNode'},'*');
   }
-  mvImpl.registerEvents(mvImpl.mainNode);
+  mvImpl.registerEvents(selectedNode);
   maximizeMainNode();
   scheduleVideoOverlayUpdate();
 }
@@ -731,6 +876,9 @@ function handleConfiguredHotkey(event) {
   return true;
 }
 
+window.addEventListener('mousedown', storeVideoSurfaceClick, true);
+window.addEventListener('click', handleVideoSurfaceClick, true);
+
 window.addEventListener('keydown', event => {
   if(event.key === 'Escape' && mvImpl.status === 'selectVideo') {
     chrome.runtime.sendMessage({action: 'cancelSelectMode'});
@@ -745,7 +893,7 @@ window.addEventListener('keydown', event => {
     const func = keyFuncs[event.keyCode];
     if(func){
       //send message to background script !
-      //func(mvImpl.mainNode, event.keyCode, event.shiftKey, event.ctrlKey);
+      //func(mvImpl.selectedNode, event.keyCode, event.shiftKey, event.ctrlKey);
       if(event.keyCode === 70) {// fullscreen
         mvImpl.mainNode.requestFullscreen();
       }
@@ -1207,9 +1355,9 @@ window.addEventListener('mvToolbarToggleMaximaMode', event => {
 
 chrome.runtime.onMessage.addListener( (message, sender, sendResponse) => {
   if(message.action === 'videoHotkey') {
-    if(mvImpl.mainNode.tagName === 'VIDEO') {
+    if(mvImpl.selectedNode && mvImpl.selectedNode.tagName === 'VIDEO') {
       const func = keyFuncs[message.keyCode];
-      func(mvImpl.mainNode, message.keyCode, message.shiftKey, message.ctrlKey);
+      func(mvImpl.selectedNode, message.keyCode, message.shiftKey, message.ctrlKey);
     }
   }
   else if(message.action === 'maximizeVideo') {
@@ -1237,8 +1385,8 @@ chrome.runtime.onMessage.addListener( (message, sender, sendResponse) => {
       }
       mvImpl.strict = message.strict;
       maximizeVideo(elem, chain);
-      if(mvImpl.mainNode.tagName === 'VIDEO') {
-        mvImpl.mainNode.focus({preventScroll:true});
+      if(mvImpl.selectedNode.tagName === 'VIDEO') {
+        mvImpl.selectedNode.focus({preventScroll:true});
       }
       chrome.runtime.sendMessage({action: 'popupWindow'});
     }
