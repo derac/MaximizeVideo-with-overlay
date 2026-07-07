@@ -517,6 +517,10 @@ function maximizeMainNode() {
   let originalStyle = mvImpl.originalStyle = (mvImpl.mainNode.getAttribute('style') || '');
   let fixedStyle = vnStyle;
   let fixedStyleList = [...vnStyleList]
+  if(shouldPassPointerEventsThroughMainNode()) {
+    fixedStyle += 'pointer-events:none !important;';
+    fixedStyleList.push('pointer-events');
+  }
   let vnNewStyle = '';
   originalStyle = originalStyle.trim().replace(/\r\n/g, '\r').replace(/\n/g, '\r').replace(/\r/g, '');
   if (originalStyle === '') {
@@ -547,6 +551,12 @@ function maximizeMainNode() {
   mvImpl.mainNode.setAttribute('style', vnNewStyle);
   lockMainNodeStyle(true);
 };
+
+function shouldPassPointerEventsThroughMainNode() {
+  return mvImpl.mainNode &&
+    mvImpl.mainNode.tagName === 'VIDEO' &&
+    !mvImpl.mainNode.hasAttribute('controls');
+}
 
 function restoreVideo() {
   if (!mvImpl.selectedNode) return;
