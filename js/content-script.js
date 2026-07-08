@@ -352,7 +352,7 @@ let vnStyle = [
   'border-width:0 !important;',
   'cursor:default !important;',
   'object-fit:contain !important;',
-  'z-index: 2147483639 !important;',
+  'z-index: 2147483645 !important;',
 ].join('');
 let vnStyleList = [
   'position', 'top', 'left', 'min-width',
@@ -395,6 +395,7 @@ mvImpl.videoOverlayFrame = null;
 mvImpl.videoOverlayTimer = null;
 mvImpl.videoOverlayObserver = null;
 mvImpl.pendingSurfaceClick = null;
+mvImpl.hiddenOccluders = [];
 
 function getHashCode(length) {
   let hashCode = '';
@@ -563,6 +564,7 @@ function maximizeMainNode() {
   mvImpl.mainNode.setAttribute('style', mvImpl.vnNewStyle);
   lockMainNodeStyle(true);
   maximizeSelectedVideoNode();
+  hidePageOccluders();
 }
 
 function isPlayerControlNode(node) {
@@ -596,6 +598,52 @@ function isPlayerControlNode(node) {
   return controlPattern.test(text);
 }
 
+function isMediaControlLikeNode(node) {
+  let controlPattern = /(^|[\s_-])(seek|scrub|progress|slider|volume|mute|play|pause|fullscreen|speed|rate|caption|subtitle)([\s_-]|$)/i;
+
+  if(!node || !node.tagName) {
+    return false;
+  }
+  if(node.classList && node.classList.contains('mvVideoOverlayButton')) {
+    return true;
+  }
+
+  let tagName = node.tagName.toLocaleLowerCase();
+  let inputType = node.getAttribute ? (node.getAttribute('type') || '').toLocaleLowerCase() : '';
+  if(tagName === 'input' && inputType === 'range') {
+    return true;
+  }
+
+  let role = node.getAttribute ? node.getAttribute('role') : '';
+  if(role && role.toLocaleLowerCase() === 'slider') {
+    return true;
+  }
+
+  let className = typeof node.className === 'string' ? node.className : '';
+  let text = [
+    node.id || '',
+    className,
+    node.getAttribute ? node.getAttribute('aria-label') || '' : '',
+    node.getAttribute ? node.getAttribute('title') || '' : ''
+  ].join(' ');
+  return controlPattern.test(text);
+}
+
+function containsMediaControlLikeNode(node) {
+  if(isMediaControlLikeNode(node)) {
+    return true;
+  }
+
+  let elements = node.querySelectorAll('*');
+  for(let elem of elements) {
+    if(isMediaControlLikeNode(elem)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function hasPlayerControls(node, video) {
   let elements = node.querySelectorAll('*');
   for(let elem of elements) {
@@ -627,6 +675,85 @@ function getVideoPlayerNode(node) {
   }
 
   return node;
+}
+
+function isMaximizedNode(node) {
+  return node === mvImpl.mainNode ||
+    node === mvImpl.selectedNode ||
+    (node.contains && (node.contains(mvImpl.mainNode) || node.contains(mvImpl.selectedNode))) ||
+    (mvImpl.mainNode && mvImpl.mainNode.contains && mvImpl.mainNode.contains(node));
+}
+
+function shouldHidePageOccluder(node, playerRect) {
+  if(!node || !node.tagName || isMaximizedNode(node)) {
+    return false;
+  }
+  if(node.classList && (
+    node.classList.contains('mvVideoOverlayButton') ||
+    node.classList.contains('mvCover') ||
+    node.classList.contains('mvVideoBlock')
+  )) {
+    return false;
+  }
+  if(containsMediaControlLikeNode(node)) {
+    return false;
+  }
+
+  let style = window.getComputedStyle(node);
+  let zIndex = parseInt(style.zIndex);
+  let positionedAbovePage = ['fixed', 'sticky'].includes(style.position) ||
+    (style.position === 'absolute' && Number.isFinite(zIndex) && zIndex >= 1000);
+  if(!positionedAbovePage) {
+    return false;
+  }
+  if(style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) {
+    return false;
+  }
+
+  let rect = node.getBoundingClientRect();
+  if(rect.width < 1 || rect.height < 1) {
+    return false;
+  }
+  return intersectRect(playerRect, rect);
+}
+
+function hidePageOccluders() {
+  restorePageOccluders();
+
+  let playerRect = mvImpl.mainNode.getBoundingClientRect();
+  let elements = document.querySelectorAll('body *');
+  for(let node of elements) {
+    if(!shouldHidePageOccluder(node, playerRect)) {
+      continue;
+    }
+
+    mvImpl.hiddenOccluders.push({
+      node: node,
+      style: node.getAttribute('style')
+    });
+    let originalStyle = node.getAttribute('style') || '';
+    node.setAttribute('style', originalStyle + ';visibility:hidden !important;pointer-events:none !important;');
+  }
+}
+
+function restorePageOccluders() {
+  if(!mvImpl.hiddenOccluders || !mvImpl.hiddenOccluders.length) {
+    mvImpl.hiddenOccluders = [];
+    return;
+  }
+
+  for(let item of mvImpl.hiddenOccluders) {
+    if(!item.node || !item.node.isConnected) {
+      continue;
+    }
+    if(item.style === null) {
+      item.node.removeAttribute('style');
+    }
+    else {
+      item.node.setAttribute('style', item.style);
+    }
+  }
+  mvImpl.hiddenOccluders = [];
 }
 
 function maximizeSelectedVideoNode() {
@@ -700,6 +827,7 @@ function handleVideoSurfaceClick(event) {
 
 function restoreVideo() {
   if (!mvImpl.selectedNode) return;
+  restorePageOccluders();
   lockMainNodeStyle(false);
   mvImpl.mainNode.setAttribute('style', mvImpl.originalStyle);
   if(mvImpl.selectedVideoOriginalStyle !== null && mvImpl.selectedVideoOriginalStyle !== undefined) {

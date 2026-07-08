@@ -52,7 +52,7 @@
   transform: none !important;
   transition: opacity 120ms ease, background-color 120ms ease !important;
   width: 26px !important;
-  z-index: 2147483644 !important;
+  z-index: 2147483647 !important;
 }
 
 .mvVideoOverlayButton::before,
