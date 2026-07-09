@@ -1,5 +1,6 @@
 let currentPrefs = {};
 const defaultPrefs = {
+  toolbarAction: 1,
   showVideoOverlay: true,
   enableFirstVideoHotkey: true,
   firstVideoHotkey: 'T',

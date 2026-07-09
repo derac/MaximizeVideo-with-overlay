@@ -396,6 +396,8 @@ mvImpl.videoOverlayTimer = null;
 mvImpl.videoOverlayObserver = null;
 mvImpl.pendingSurfaceClick = null;
 mvImpl.hiddenOccluders = [];
+mvImpl.firstVideoCache = null;
+mvImpl.firstVideoCacheFallbackTimer = null;
 
 function getHashCode(length) {
   let hashCode = '';
@@ -422,9 +424,7 @@ function isYoutubeWatch () {
 function addToMvCover (elemInfo) {
   // console.log('[addToMvCover] ' + JSON.stringify(elemInfo, null, 4));
   // console.log(new Date());
-  let diffTime = 0;
   let allBlock = [];
-  diffTime = new Date() - mvImpl.startScanTime;
 
   if(mvImpl.status !== 'selectVideo')
     return;
@@ -443,6 +443,8 @@ function addToMvCover (elemInfo) {
       v.style.width = elemInfo.width + 'px';
       v.style.height = elemInfo.height + 'px';
       v.style.display = elemInfo.visible ? 'block' : 'none';
+      if(elemInfo.frameId !== undefined)
+        v.setAttribute('mvFrameId', elemInfo.frameId);
       found = true;
       break;
     }
@@ -458,6 +460,8 @@ function addToMvCover (elemInfo) {
     videoBlock.style.width = elemInfo.width + 'px';
     videoBlock.style.height = elemInfo.height + 'px';
     videoBlock.setAttribute('mvMaskHash', elemInfo.hashCode);
+    if(elemInfo.frameId !== undefined)
+      videoBlock.setAttribute('mvFrameId', elemInfo.frameId);
     //videoBlock.textContent = elemInfo.hashCode;
     videoBlock.addEventListener('mousedown', event => {
       if(event.button === 0) {
@@ -481,19 +485,76 @@ function addToMvCover (elemInfo) {
     allBlock.push(v);
   }
 
-  if(mvImpl.toolbarAction === 1 && diffTime > 600) {
+  if(mvImpl.toolbarAction === 1) {
     let selected = null;
-    for(let v of videoBlocks) {
+    for(let v of allBlock) {
       if(!selected && v.style.display !== 'none') {
         selected = v;
         break;
       }
     }
     if(selected) {
+      cacheFirstVideoBlock(selected);
       mvImpl.toolbarAction = 0;
       chrome.runtime.sendMessage({action: 'maximizeVideo', url: window.location.href, hashCode: selected.getAttribute('mvMaskHash')});
     }
   }
+}
+
+function cacheFirstVideoBlock(videoBlock) {
+  let hashCode = videoBlock.getAttribute('mvMaskHash');
+  if(!hashCode)
+    return;
+  mvImpl.firstVideoCache = {
+    hashCode: hashCode,
+    frameId: videoBlock.getAttribute('mvFrameId') || '',
+    tagName: videoBlock.getAttribute('tn') || ''
+  };
+}
+
+function clearFirstVideoCacheFallbackTimer() {
+  if(mvImpl.firstVideoCacheFallbackTimer) {
+    clearTimeout(mvImpl.firstVideoCacheFallbackTimer);
+    mvImpl.firstVideoCacheFallbackTimer = null;
+  }
+}
+
+function startVideoMaskSearch(message) {
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    mvImpl.startScanTime = new Date();
+    let cover = document.createElement('DIV');
+    cover.classList.add('mvCover');
+    cover.setAttribute('mvMaskHash', message.hashCode);
+    document.body.appendChild(cover);
+    let msg = {action: 'scanVideo', hashCode: message.hashCode};
+    // if(message.supportFlash !== undefined) msg.supportFlash = message.supportFlash;
+    if(message.minWidth !== undefined) msg.minWidth = message.minWidth;
+    if(message.minHeight !== undefined) msg.minHeight = message.minHeight;
+    chrome.runtime.sendMessage(msg);
+  }
+}
+
+function tryMaximizeCachedFirstVideo(message) {
+  if(!mvImpl.firstVideoCache || !mvImpl.firstVideoCache.hashCode)
+    return false;
+
+  let cachedHashCode = mvImpl.firstVideoCache.hashCode;
+  chrome.runtime.sendMessage({
+    action: 'maximizeVideo',
+    url: window.location.href,
+    hashCode: cachedHashCode,
+    cachedFirstVideo: true
+  });
+
+  clearFirstVideoCacheFallbackTimer();
+  mvImpl.firstVideoCacheFallbackTimer = setTimeout(() => {
+    mvImpl.firstVideoCacheFallbackTimer = null;
+    if(mvImpl.status === 'normal') {
+      mvImpl.firstVideoCache = null;
+      startVideoMaskSearch(message);
+    }
+  }, 250);
+  return true;
 }
 
 function lockMainNodeStyle(lock) {
@@ -911,6 +972,7 @@ window.addEventListener('message', e => {
     }
   }
   else if(e.data.action === 'setVideoNode'){ //message from child
+    clearFirstVideoCacheFallbackTimer();
     let iframe = getChildIFrameById(e.data.id);
     let hashCode = iframe.getAttribute('mvHashCode');
     if(!hashCode) {
@@ -938,6 +1000,7 @@ window.addEventListener('message', e => {
       for(let elemInfo of e.data.elemInfos) {
         elemInfo.left += iframeRect.left + window.scrollX;
         elemInfo.top += iframeRect.top + window.scrollY;
+        elemInfo.frameId = e.data.id;
         addToMvCover(elemInfo);
       }
     }
@@ -1500,6 +1563,7 @@ chrome.runtime.onMessage.addListener( (message, sender, sendResponse) => {
 
     let { elem, chain } = findVideoElement('video[mvHashCode="'+message.hashCode+'"]')
     if(elem) {
+      clearFirstVideoCacheFallbackTimer();
       mvImpl.status = 'maximaVideo';
       initPrefs( ()=>{
         setHideCursorTimer();
@@ -1536,18 +1600,9 @@ chrome.runtime.onMessage.addListener( (message, sender, sendResponse) => {
         // console.log('setVideoMask');
         // console.log(new Date());
         removeVideoMask();
-        if (document.readyState === 'complete' || document.readyState === 'interactive') {
-          mvImpl.startScanTime = new Date();
-          let cover = document.createElement('DIV');
-          cover.classList.add('mvCover');
-          cover.setAttribute('mvMaskHash', message.hashCode);
-          document.body.appendChild(cover);
-          let msg = {action: 'scanVideo', hashCode: message.hashCode};
-          // if(message.supportFlash !== undefined) msg.supportFlash = message.supportFlash;
-          if(message.minWidth !== undefined) msg.minWidth = message.minWidth;
-          if(message.minHeight !== undefined) msg.minHeight = message.minHeight;
-          chrome.runtime.sendMessage(msg);
-        }
+        if(message.toolbarAction === 1 && tryMaximizeCachedFirstVideo(message))
+          return;
+        startVideoMaskSearch(message);
       }
       else if(mvImpl.status === 'selectVideo') {
         chrome.runtime.sendMessage({action: 'cancelSelectMode'});

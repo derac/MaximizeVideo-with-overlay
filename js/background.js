@@ -11,7 +11,7 @@ const getDefaultIconColor = () => {
 
 let defaultPreference = {
   popupWindow: false,
-  toolbarAction: 0,
+  toolbarAction: 1,
   // supportFlash: true,
   minWidth: 100,
   minHeight: 100,
